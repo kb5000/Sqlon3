@@ -32,3 +32,13 @@
 *.exe
 *.out
 *.app
+
+/rust/target/
+/node/node_modules/
+/java/build/
+/java/lib/*.jar
+/python/__pycache__/
+/cpp/build/
+*.pdb
+*.ilk
+/java/target/

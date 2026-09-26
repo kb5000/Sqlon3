@@ -1,125 +1,94 @@
-# Sqlon 2
+# Sqlon 3
 
-Sqlon 2是一个类JSON的通用的序列化库，生成的文件分为Schema和Data两部分。其数据模型如下：
+Sqlon 3 serializes structured values as a readable Schema plus binary Data. It covers JSON values and adds raw Bytes.
 
+- **Normative specification:** [SPEC.md](SPEC.md)
+- **中文译本：** [SPEC.zh-CN.md](SPEC.zh-CN.md)
 
-| Sqlon 2类型 | C++类型 | 容器类型 |
-| - | - | - |
-| Null | / |   |
-| Bool | bool |   |
-| Int | int64_t |   |
-| Double | double |   |
-| String | string | 字节序列 |
-| List | vector<Sqlon> | 后接多个Sqlon 2序列 |
-| Object | Map<String, Sqlon> | 后接一系列键值对 |
-| Array | vector<Sqlon> | 后接一个Sqlon 2序列的重复 |
+The English specification is the single source of truth. This repository contains a Rust reference implementation and independent C++, Java, Python, and Node.js implementations. The Sqlon 2 source has been removed.
 
-设计思想：数据模型由Sqlon 1的仿JSON架构演化而来，在一些地方做了变更，使其更加具有解释性和可用性。
+| Language | Implementation |
+| --- | --- |
+| Rust | [rust/src/lib.rs](rust/src/lib.rs) |
+| C++17 | [cpp/Sqlon3.h](cpp/Sqlon3.h), [cpp/Sqlon3.cpp](cpp/Sqlon3.cpp) |
+| Java 17 | [java/src/Sqlon3.java](java/src/Sqlon3.java) |
+| Python 3.10+ | [python/sqlon3.py](python/sqlon3.py) |
+| Node.js | [node/sqlon3.js](node/sqlon3.js) |
 
-1. List和Object固定为不可变长，也就是长度信息储存在Schema中而非Data中，因为存储在Data是毫无意义的。Object的固定长度Key也去掉，虽然其可以降低占用空间但基本无法使用。
-2. 增加了Array类型，后面只跟一个Sqlon序列，但可以根据Data中的长度信息重复多次，这使得Sqlon的Schema可以表示变长数据，是真正的变长功能，不再需要愚蠢的L2SS了。
-3. Null类型改为占用1字节，这样防止Array类型带来的问题。
+Each implementation provides Schema parsing, Data encoding and decoding, deterministic JSON rendering, and the fixed `@38:L2SX` packing convention. The current implementations cap individual Data sequences at 64 MiB and container counts at one million elements.
 
-### Schema定义
+## Build and test
 
+From the repository root:
 
-| Sqlon 2类型 | Schema格式 |
-| - | - |
-| Null | N |
-| Bool | B |
-| Int | I |
-| Double | D |
-| String | S\<Length> |
-| List | L[Length]+ |
-| Object | O[Length]+ |
-| Array | A- |
-
-其中，尖括号代表可选项，方括号代表必选项，+代表此处可以跟Length个Sqlon 2序列，-代表此处可以跟1个Sqlon 2序列。
-
-### Data定义
-
-
-| Sqlon 2类型 | Data格式 | 空间 |
-| - | - | - |
-| Null | 存储为N | 1字节 |
-| Bool | 存储为T或F | 1字节 |
-| Int | 小端序 | 8字节 |
-| Double | 小端序 | 8字节 |
-| String | 如果是可变长的先8字节Int型长度后接字节序列 | 变长 |
-| List | 存储后面的Sqlon 2序列 | 0（本身不占空间） |
-| Object | 对于每一项，先存储一个String作为Key再存储一个Sqlon 2作为Value | 变长 |
-| Array | 先8字节长度再存储多个Sqlon 2序列 | 变长 |
-
-### 内存模型：
-
-Sqlon 2保存的数据是一个树形的结构。如一个List型数据中含有一个vector\<Sqlon2\>类型的指针，保存的内容就是具体的List数据。我们可以用getList()方法来访问其中的数据，也就是返回一个vector\<Sqlon2\>的引用。
-
-Sqlon 2采用类似vector的指针模式，也就是Sqlon 2保存一个对象的独占所有权，在发生复制的时候会自动进行深拷贝。
-
-### API
-
-#### C++
-
-```cpp
-Sqlon2(), Sqlon2(bool), Sqlon2(int), Sqlon2(double), Sqlon2(string), Sqlon2(vector<Sqlon2>), Sqlon2(map<string, Sqlon2>)
+```sh
+cargo test --manifest-path rust/Cargo.toml
+python -m unittest discover -s python -v
+npm test --prefix node
+cmake -S cpp -B cpp/build
+cmake --build cpp/build --config Debug
+ctest --test-dir cpp/build -C Debug --output-on-failure
+javac -encoding UTF-8 -d java/build java/src/Sqlon3.java java/src/Sqlon3Optimizer.java java/src/TestSqlon3.java java/src/TestOptimization.java
+java -cp java/build TestSqlon3
+java -cp java/build TestOptimization
 ```
 
-通过原始类型构建一个Sqlon2对象，进行复制操作。
+C++, Java, Python, and Node.js use only their standard libraries. Rust uses `base64` and `num-bigint` for JSON output. An optional Maven project is provided in `java/pom.xml`.
 
-对于`string`参数，其签名为`Sqlon2(string, bool varval=true)`，第二个参数如果为false则表示长度信息保存在Schema中。
+The shared [fixture](fixtures/full.schema) and its [binary Data](fixtures/full.bin) cover nested objects, arrays, UTF-8 strings, raw bytes, and Decimal. All five implementations decode it to the same [JSON result](fixtures/full.json). The fixture can be regenerated with [fixtures/generate.py](fixtures/generate.py).
 
-对于`vector<Sqlon2>`参数，其签名为`Sqlon2(vector<Sqlon2>, bool isArray=false)`，第二个参数如果为true则表示创建的是一个Array而非List。
+## Minimal example
 
-```cpp
-Sqlon2 obj;
-obj.isNull();
-obj.getBool();
-obj.getInt();
-obj.getDouble();
-obj.getString();
-obj.getList();
-obj.getObjet();
-obj.get<T>();
+A Schema `@32:AN` with Data bytes `03 00` represents `[null,null,null]`. Here `2` selects two-byte little-endian lengths, `A` is a variable-count array, and `N` is a zero-byte Null element.
+
+## Optional size optimization
+
+Schema-driven `Document.encode` remains explicit and unchanged. Use the automatic
+encoder when the Schema may be inferred from a value. Its default options disable
+optimizations and use width 8; JSON arrays initially use heterogeneous Lists.
+`optimized()` enables fixed strings, fixed bytes, homogeneous arrays, fixed keys,
+and compact lengths. Each flag can also be enabled independently.
+
+| Language | Automatic encoder | Full options package |
+| --- | --- | --- |
+| Rust | `encode_auto(&value, &options)` | `EncodeOptions::optimized()` |
+| C++ | `encode_auto(value, options)` | `EncodeOptions::optimized()` |
+| Java | `Sqlon3Optimizer.encodeAuto(value, options)` | `Sqlon3Optimizer.EncodeOptions.optimized()` |
+| Python | `encode_auto(value, options)` | `EncodeOptions.optimized()` |
+| Node.js | `encodeAuto(value, options)` | `EncodeOptions.optimized()` |
+
+The result contains `document` (the selected Schema) and `data`. Send or retain
+both. Decode with `document.decode(data)`; no optimization option is needed.
+The automatic encoder accepts both List and Array input values as JSON arrays.
+
+Python example:
+
+```python
+from sqlon3 import Value, EncodeOptions, encode_auto
+
+v = Value("L", [Value("I", i) for i in range(100)])
+encoded = encode_auto(v, EncodeOptions.optimized())
+print(encoded.document.text())  # @32:AI
+restored = encoded.document.decode(encoded.data)
+
+# Enable only compact length prefixes.
+encoded = encode_auto(v, EncodeOptions(compact_lengths=True))
+# Override an individual flag in the complete package.
+options = EncodeOptions.optimized(fixed_strings=False)
 ```
 
-返回Sqlon2对象包含的数据，返回的是引用。
+Rust imports these APIs directly from `sqlon3`; C++ declares them in `Sqlon3.h`.
+Java options are an immutable record, with fields in this order: `fixedStrings`,
+`fixedBytes`, `homogeneousArrays`, `fixedKeys`, `compactLengths`, `width`. Rust and C++ expose mutable fields in snake_case. Node.js accepts
+camelCase fields and supports `EncodeOptions.optimized({ fixedStrings: false })`.
 
-```cpp
-Sqlon2 a, b;
-a = b;
-a == b;
-a < b;
-a > b;
-a <= b;
-a >= b;
-a != b;
-```
+Layout comparisons use Schema plus Data size; equal-size alternatives
+retain the baseline. Compact lengths select the smallest usable width in 2/4/8.
+Compression is handled by an outer transport or container; no compression API or header extension is defined by Sqlon 3. Optimization adds
+analysis work and intermediate allocations, so it is not a CPU-speed preset and
+does not promise global minimum size. Explicit Schema reuse avoids this analysis.
+See [SPEC Appendix A](SPEC.md#appendix-a-optional-encoder-policies-informative).
 
-Sqlon 2实现了一个偏序关系，也就是同一类型的两数据如果是Bool, Int, Double, String是可以比较的，而不同类型数据无论如何比较结果都是false。同时，List的比较可以自动按照字典序比较其中的元素，如果长度不同那么无法比较。
-
-关于Null的比较，可以认为Null是一个值，因此可以判断相等。
-
-```cpp
-Sqlon2 obj;
-obj.serialize();
-obj.describe();
-Sqlon::deserialize(data, description);
-```
-
-Sqlon 2的核心功能是序列化。`serialize`和`describe`要分开生成。`serialize`得到的是二进制字符串，而`describe`得到的是人类可读的字符串。最终反序列化时同时需要两个数据。
-
-```cpp
-Sqlon2 obj;
-obj.getTypeName();
-obj.to_string();
-```
-
-Sqlon 2还提供了元信息功能方便调试。getTypeName返回其数据类型的String，而to_string返回其JSON格式的可读字符串。
-
-### 使用
-
-如果需要将Schema和Data一起传输，可以使用"L2SS"的Schema，将Schema放在前面，Data放在后面。这样就相当于将两个字符串进行打包，同时Schema是固定的。
-
-### 注意
-
-Array功能目前还不完善，必须手动保证Array内部的所有数据都是同一结构的，不然序列化会出错。
+All five implementations also encode the same [optimized fixture](fixtures/optimized.schema)
+to identical [Data bytes](fixtures/optimized.bin). Java's additional optimization
+test entry point is `TestOptimization`.

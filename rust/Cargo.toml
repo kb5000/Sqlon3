@@ -1,0 +1,10 @@
+[package]
+name = "sqlon3"
+version = "0.1.0"
+edition = "2021"
+description = "Reference implementation of the Sqlon 3 Schema/Data format"
+license = "MIT"
+
+[dependencies]
+base64 = "0.21"
+num-bigint = "0.4"
